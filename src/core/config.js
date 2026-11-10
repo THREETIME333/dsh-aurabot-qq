@@ -13,6 +13,7 @@ export const DEFAULTS = {
   communityMigrated: {}, // 搬到社区库的模块处理过没有（id → installed / skipped / kept），只处理一次
   botQQ: '', // 机器人 QQ 号（向导里填）
   ownerQQ: '', // 主人 QQ 号（向导里填）
+  trustedFriends: [], // 面板里的信任好友（QQ 号列表或 QQ 号→能力表），只是查看/备用；平时由大肥鱼在主人私聊里直接管 trustedFriends.json 里的名单
   ownerName: '主人',
   ownerLevel: 'full', // full | social | chat
   approvalNotify: true, // DSH 要授权时把请求发到主人私聊

@@ -41,6 +41,7 @@
     "personas",
     "assets",
     "cordis.patch.yml",
+    "_conf_schema.json",
     "README.md",
     "docs/USER-MANUAL.md",
     "docs/MODULE-TUTORIAL.md",

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { parseReply, stripMarkdown, bubbleDelay } from '../src/chat/reply.js'
 import { decideGroupReply, engagedHint, policyFor, inQuietHours, DEFAULT_GROUP_POLICY } from '../src/chat/group-policy.js'
 import { parseMessageEvent, isStickerSegment, stickerSizeOk, imageSize } from '../src/chat/inbound.js'
-import { checkAllowed, levelFor, presetFor, isOwner, profileToolVisible, profilePermits } from '../src/chat/access.js'
+import { checkAllowed, levelFor, presetFor, trustedPermits, isOwner, profileToolVisible, profilePermits } from '../src/chat/access.js'
 import { avatarSource } from '../src/modules/profile/index.js'
 import { redact, registerSecret } from '../src/core/redact.js'
 
@@ -211,6 +211,31 @@ test('权限档位：主人私聊完整，群聊永远受限', () => {
   assert.equal(presetFor('full', { longTasks: true }), 'aurabot-private-long')
   assert.equal(presetFor('social', { longTasks: true }), 'aurabot-social')
   assert.equal(presetFor('social'), 'aurabot-social')
+})
+
+test('信任好友档位：私聊进 trusted，群聊还是 social', async () => {
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const dir = mkdtempSync(join(tmpdir(), 'aurabot-pure-'))
+  const prev = process.env.AURABOT_DATA_DIR
+  process.env.AURABOT_DATA_DIR = dir
+  try {
+    const trustedCfg = { ...cfg, trustedFriends: ['20002'] }
+    assert.equal(levelFor(trustedCfg, { kind: 'private', userId: '20002' }), 'trusted')
+    assert.equal(levelFor(trustedCfg, { kind: 'group', userId: '20002' }), 'social')
+    assert.equal(levelFor(trustedCfg, { kind: 'private', userId: '99999' }), 'social')
+    assert.equal(presetFor('trusted'), 'aurabot-trusted')
+    assert.equal(trustedPermits(trustedCfg, 'shell', { kind: 'private', userId: '20002' }).ok, true)
+    assert.equal(trustedPermits(trustedCfg, 'fs', { kind: 'private', userId: '20002' }).ok, true)
+    assert.equal(trustedPermits(trustedCfg, 'jobs', { kind: 'private', userId: '20002' }).ok, false)
+    assert.equal(trustedPermits(trustedCfg, 'web', { kind: 'private', userId: '20002' }).ok, false)
+    assert.equal(trustedPermits(trustedCfg, 'shell', { kind: 'group', userId: '20002' }).ok, false)
+    assert.equal(trustedPermits(trustedCfg, 'shell', { kind: 'private', userId: '99999' }).ok, false)
+  } finally {
+    if (prev === undefined) delete process.env.AURABOT_DATA_DIR
+    else process.env.AURABOT_DATA_DIR = prev
+  }
 })
 
 test('群管发起人校验：只认主人', () => {

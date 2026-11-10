@@ -7,6 +7,58 @@
 // 这里返回 deny 就不会执行，能拿到「命令原文」，比只靠提示词可靠。
 
 import { isOwner } from '../chat/access.js'
+import { dataDir, dshHome } from '../core/store.js'
+import { homedir } from 'node:os'
+import { basename, dirname, extname, join, resolve } from 'node:path'
+
+// ---------- 信任好友的敏感路径禁区（写死在代码里，不走配置） ----------
+// 信任会话里读/写下面这些路径一律拒绝（与 dangerConfirm 开关无关）：
+//  - DSH 凭据 / 环境变量：~/.dsh/.credentials.yaml、~/.dsh/.env
+//  - 大肥鱼自己的配置与会话：plugins-data/aurabot 里的 config.json、sessions.json
+//  - 名单与审计日志本身：trustedFriends.json、trustedFriends.log
+//  - ~/.dsh 下叫 device.json / session.json / token.json 的文件（QQ 会话/设备文件）
+//  - ~/.dsh 根目录下一层的 *.yaml / *.yml / *.json / *.env / *.toml（部署配置）
+// 只拦信任会话；主人和 DSH 自己的会话不受影响。
+const TRUSTED_BLOCKED_EXTS = new Set(['.yaml', '.yml', '.json', '.env', '.toml'])
+const TRUSTED_BLOCKED_BASENAMES = new Set(['device.json', 'session.json', 'token.json'])
+
+function trustedBlockedHit(text) {
+  if (!text) return ''
+  const home = homedir()
+  const dsh = resolve(dshHome())
+  const aurabot = resolve(dataDir())
+  const fixed = [
+    join(dsh, '.credentials.yaml'),
+    join(dsh, '.env'),
+    join(aurabot, 'config.json'),
+    join(aurabot, 'sessions.json'),
+    join(aurabot, 'trustedFriends.json'),
+    join(aurabot, 'trustedFriends.log'),
+  ]
+  let expanded = String(text)
+    .replace(/\$\{HOME\}/g, home)
+    .replace(/\$HOME/g, home)
+    .replace(/~\//g, `${home}/`)
+  if (expanded.startsWith('~')) expanded = home + expanded.slice(1)
+  for (const file of fixed) if (expanded.includes(file)) return file
+  const tokens = expanded.split(/[\s"'`=:;|&<>()\[\]{},]+/)
+  for (const token of tokens) {
+    if (!token || !token.includes('/')) continue
+    const abs = resolve(home, token)
+    if (fixed.includes(abs)) return abs
+    if (TRUSTED_BLOCKED_BASENAMES.has(basename(abs)) && abs.startsWith(dsh + '/')) return abs
+    if (dirname(abs) === dsh && (TRUSTED_BLOCKED_EXTS.has(extname(abs)) || basename(abs) === '.env' || basename(abs).endsWith('.env'))) return abs
+  }
+  return ''
+}
+
+// 信任会话里一次工具调用是否碰了敏感路径（返回命中的路径，没命中返回 ''）。
+// bash/pwsh 扫整段命令；其他工具把 arguments 整体当文本扫。
+function trustedSensitiveHit(tool, args) {
+  if (tool === 'bash' || tool === 'pwsh') return trustedBlockedHit(String(args?.command || ''))
+  return trustedBlockedHit(JSON.stringify(args || {}))
+}
+
 
 const CONFIRM_RE = /^(确认|确认执行|同意|同意执行|允许|允许执行|可以|执行吧|放行|yes|y|ok)$/i
 const CANCEL_RE = /^(取消|取消执行|拒绝|不要|不|不行|别|停|停手|拦下|no|n)$/i
@@ -439,7 +491,7 @@ const clip = (text, n = 300) => (text.length > n ? text.slice(0, n) + '…' : te
  * @param {number} [o.timeoutMs] 等确认的超时（默认 60 秒）
  * @param {object} [o.log]
  */
-export function createDangerGuard ({ getConfig, deliver, chatOfSession, isOwnedSession, ownerQQ, timeoutMs = 60_000, log } = {}) {
+export function createDangerGuard ({ getConfig, deliver, chatOfSession, isOwnedSession, ownerQQ, isTrustedChat, timeoutMs = 60_000, log } = {}) {
   const pending = new Map() // chatId → { resolve, timer }
   let disposed = false
 
@@ -466,6 +518,16 @@ export function createDangerGuard ({ getConfig, deliver, chatOfSession, isOwnedS
         return { kind: 'deny', reason: '只有主人私聊才能创建成员。' }
       }
     }
+    // 信任会话：敏感路径禁区（与 dangerConfirm 开关无关，只拦信任会话）
+    const sessId = exec.agent?.session?.id
+    const sessChat = chatOfSession ? String(chatOfSession(sessId) || '') : ''
+    if (typeof isTrustedChat === 'function' && sessChat && isTrustedChat(sessChat)) {
+      const hit = trustedSensitiveHit(String(exec.name || ''), exec.arguments)
+      if (hit) {
+        log?.warn?.(`已拦下信任会话的敏感路径访问（${sessChat}）：${hit}`)
+        return { kind: 'deny', reason: `这个路径不让碰（${hit}）：信任好友不能读写大肥鱼的配置和会话文件。` }
+      }
+    }
     const cfg = getConfig() || {}
     if (!cfg.security || cfg.security.dangerConfirm !== true) return next()
     const tool = String(exec && exec.name || '')
@@ -488,12 +550,16 @@ export function createDangerGuard ({ getConfig, deliver, chatOfSession, isOwnedS
     const owner = String(ownerQQ ? ownerQQ() : '')
     const ownerChat = owner ? `private:${owner}` : ''
     // 是我的会话但认不出聊天（比如 QQ 会话刚建立、映射还没落盘）：不敢放也不敢问，仍然拦下
-    if (!chatId || chatId !== ownerChat) {
+    const isTrustedChatSession = typeof isTrustedChat === 'function' && chatId ? isTrustedChat(chatId) : false
+    const friendQQ = chatId.startsWith('private:') ? chatId.slice('private:'.length) : chatId
+    // 确认发给谁：主人自己就是 chatId；信任好友的确认发给主人，用主人私聊做键（主人确认队列共用）
+    const confirmKey = isTrustedChatSession && chatId !== ownerChat ? ownerChat : chatId
+    if ((!chatId || chatId !== ownerChat) && !isTrustedChatSession) {
       log?.warn?.(`危险命令已拦下（非主人私聊 ${chatId || '未知'}）：${clip(command, 120)}`)
       return { kind: 'deny', reason: `这条命令被安全策略拦下了（${danger.label}）：只有主人私聊里、并且经过主人确认才能执行。` }
     }
     // 同一个人已经在等确认：别再发第二条，直接拦
-    if (pending.has(chatId)) {
+    if (pending.has(confirmKey)) {
       return { kind: 'deny', reason: `上一条危险命令还在等主人确认（${danger.label}），这条先不执行。` }
     }
     const seconds = Math.max(1, Math.round(timeoutMs / 1000))
@@ -502,14 +568,18 @@ export function createDangerGuard ({ getConfig, deliver, chatOfSession, isOwnedS
       clip(command, 260),
       `回复「确认」执行，回复「取消」拦下；${seconds} 秒内没回也会拦下。`,
     ].join('\n')
+      // 信任好友的命令：在确认消息里写明是谁（哪个 QQ）想执行，主人一看就知道
+      const askText = isTrustedChatSession && chatId !== ownerChat
+        ? `信任好友 ${friendQQ} 想执行这条命令，发给你确认：\n${question}`
+        : question
     let ok = false
     try {
       const asked = new Promise((resolve) => {
         // 注意别 unref：系统就在等这个确认（工具调用被挂住），计时器必须撑着
-        const timer = setTimeout(() => { cleanup(chatId, false); log?.warn?.(`危险命令确认超时，已拦下：${clip(command, 120)}`) }, timeoutMs)
-        pending.set(chatId, { resolve, timer })
+        const timer = setTimeout(() => { cleanup(confirmKey, false); log?.warn?.(`危险命令确认超时，已拦下：${clip(command, 120)}`) }, timeoutMs)
+        pending.set(confirmKey, { resolve, timer })
       })
-      ;(async () => { try { await deliver(ownerChat, question) } catch (error) { log?.warn?.('危险命令确认消息没发出去：', error.message); cleanup(chatId, false) } })()
+      ;(async () => { try { await deliver(ownerChat, askText) } catch (error) { log?.warn?.('危险命令确认消息没发出去：', error.message); cleanup(confirmKey, false) } })()
       ok = await asked
     } catch (error) {
       log?.warn?.('危险命令确认出错：', error.message)

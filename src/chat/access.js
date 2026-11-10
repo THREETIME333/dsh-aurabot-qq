@@ -1,7 +1,9 @@
 // 谁能跟她说话、她在每个会话里有多大权限。纯函数。
 
-/** 权限档位：full = DSH 完整工具；social = 只有 QQ 社交工具；chat = 纯聊天，没有工具。 */
-export const LEVELS = ['full', 'social', 'chat']
+import { isTrustedFriend, trustedCapabilities } from './trusted-friends.js'
+
+/** 权限档位：full = DSH 完整工具；trusted = 主人点名的信任好友：终端 + 文件读写（没有定时任务、没有联网）；social = 只有 QQ 社交工具；chat = 纯聊天，没有工具。 */
+export const LEVELS = ['full', 'trusted', 'social', 'chat']
 
 /**
  * @param {object} cfg 插件配置
@@ -29,11 +31,15 @@ export function levelFor(cfg, chat) {
   if (chat.kind === 'private' && chat.userId === owner) {
     return LEVELS.includes(cfg.ownerLevel) ? cfg.ownerLevel : 'full'
   }
+  // 信任好友：主人点名的人，私聊里才算（群聊永远不超过 social）。
+  // 名单存在 trustedFriends.json 里，levelFor 每次收到消息都重新读，不用重启。
+  if (chat.kind === 'private' && isTrustedFriend(cfg, chat.userId)) return 'trusted'
   return 'social'
 }
 
 /** 档位 → agent preset id。 */
 export function presetFor(level, cfg) {
+  if (level === 'trusted') return 'aurabot-trusted'
   if (level !== 'full') return 'aurabot-social'
   return cfg && cfg.longTasks ? 'aurabot-private-long' : 'aurabot-private'
 }
@@ -70,5 +76,17 @@ export function profilePermits(cfg, key, chat, allOwner) {
   if (p === 'off') return { ok: false, message: '这个操作在面板里关掉了' }
   if (!profileToolVisible(cfg, key, chat)) return { ok: false, message: '这里不能做这个操作' }
   if (p === 'owner' && !allOwner) return { ok: false, message: '只有主人私聊让我改才行' }
+  return { ok: true }
+}
+
+/**
+ * 信任好友有没有这个能力（key 只能是 'shell' 或 'fs'）。
+ * 每次调用都重新读名单文件；不是信任会话、或能力不对，都返回不通过。
+ */
+export function trustedPermits(cfg, key, chat) {
+  if (key !== 'shell' && key !== 'fs') return { ok: false, message: `没有 ${key} 这个能力` }
+  if (!chat || chat.kind !== 'private') return { ok: false, message: '信任授权只在私聊里生效' }
+  if (!isTrustedFriend(cfg, chat.userId)) return { ok: false, message: '不在信任名单里' }
+  if (!trustedCapabilities(cfg, chat).includes(key)) return { ok: false, message: `信任好友没有 ${key} 这个能力` }
   return { ok: true }
 }

@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Aurabot · QQ 配置",
+  "type": "object",
+  "properties": {
+    "trustedFriends": {
+      "title": "信任好友（备用）",
+      "description": "面板里的这一项只是查看/备用：平时由大肥鱼在主人私聊里直接管名单（存在 trustedFriends.json 里），主人说一声就能加人、删人，改完下一条消息就生效。这里填 QQ 号列表，也可以填「QQ 号 → 能力表」；能力只有 shell（跑命令）和 fs（读写文件）两种。",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[0-9]{5,15}$" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["shell", "fs"] }
+          }
+        }
+      ],
+      "default": []
+    }
+  }
+}

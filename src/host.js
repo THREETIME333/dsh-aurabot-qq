@@ -25,6 +25,7 @@ import { createGroupRoles } from './chat/group-roles.js'
 import { defaultModel, askModel, modelReasoning, modelVision, clearReasoningCache, clearVisionCache } from './core/llm.js'
 import { mimeOf } from './chat/inbound.js'
 import { dataDir, ensureDir } from './core/store.js'
+import { isTrustedChatId } from './chat/trusted-friends.js'
 import { createUpdateChecker, changelogSection } from './core/update.js'
 import { parseCommand, runCommand, createMutes, commandList } from './chat/commands.js'
 import { listPersonas, readPersona, savePersona, deletePersona, currentPersonaText, rulesText, seedPersonas } from './persona/personas.js'
@@ -102,6 +103,10 @@ export function apply(ctx) {
       : '')
   })
   variable('aurabot_rules_social', () => rewrite('rules', rulesText('social', cfg, rulesOpts('social')), 'social'))
+variable('aurabot_rules_trusted', () => {
+  const base = rewrite('rules', rulesText('trusted', cfg, rulesOpts('trusted')), 'trusted')
+  return base + ((cfg.security && cfg.security.dangerConfirm) ? '\n【危险命令】终端命令如果被安全策略拦下，会发给主人确认，主人回复「确认」后才能执行；不要换一种写法绕过。' : '')
+})
 
   // ---------- QQ 网关 ----------
   const snowluma = createSnowLumaManager({
@@ -529,6 +534,7 @@ export function apply(ctx) {
     // 只有明确 false（宿主自己的 GUI/CLI 会话）才放行给 DSH 自己的权限系统，别在异常时 fail-open。
     isOwnedSession: safeOwnedSession(typeof hub?.isOwnedSession === 'function' ? (sessionId) => hub.isOwnedSession(sessionId) : null),
     ownerQQ: () => cfg.ownerQQ,
+  isTrustedChat: (chatId) => isTrustedChatId(getConfig(), chatId),
   })
   core.dangerGuard = dangerGuard
   approvalRelay = createApprovalRelay({ getConfig, deliver: (chatId, text) => hub.sendText(chatId, text), chatOfSession: (id) => hub.chatOfSession(id), log })

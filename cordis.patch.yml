@@ -3,6 +3,7 @@
 # 1) aurabot：插件本体（宿主半边 src/host.js + 网页半边 client/client.js）
 # 2) 三个 agent preset，只给 Aurabot 自己建的 QQ 会话/子智能体用：
 #    - aurabot-private：主人私聊，完整工具 + 大肥鱼人格
+#    - aurabot-trusted：信任好友私聊，人格 + 终端 + 文件读写（没有定时任务、没有联网）
 #    - aurabot-private-long：同上，另挂 jobs + schedule（面板「长任务模式」打开时用，默认关）
 #    - aurabot-social ：群聊 / 其他人私聊，没有任何本地工具（shell / 文件 / 网络），只有插件按会话挂的 QQ 工具
 #    - aurabot-subagent：插件内部委派给子智能体（hub.runSubagentTurn）时用——不带人格，只带本机操作工具，
@@ -62,6 +63,52 @@
             config:
               fetch: true
               searchTimeoutMs: 60000
+    - id: preset-aurabot-trusted
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: aurabot-trusted
+        name: Aurabot · 主人私聊
+        description: 大肥鱼和主人点名的信任好友私聊时用：人格 + 终端 + 文件读写（没有定时任务、没有联网）
+        order: 63
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: "{{aurabot_persona}}\n\n{{aurabot_rules_trusted}}"
+              # 人格独占系统提示词：不带 DSH 那一大段编程助手身份和工具指南（实测私聊从 1~4 分钟一轮降下来）。
+              # 工具照样挂着，模型靠工具定义本身就会用。
+              complete: true
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
     - id: preset-aurabot-private-long
       name: '@deepseek-ai/dsh-agent-preset'
       config:

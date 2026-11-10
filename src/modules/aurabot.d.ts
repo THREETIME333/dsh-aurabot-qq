@@ -118,7 +118,7 @@ export interface Events {
   /** 她的人格全文（同步）：返回新文字改写 */
   persona: (text: string) => string | void
   /** 她的规则全文（同步）：返回新文字改写 */
-  rules: (text: string, kind: 'private' | 'social') => string | void
+  rules: (text: string, kind: 'private' | 'trusted' | 'social') => string | void
   /** 有人戳她：返回 true = 接管 */
   poke: (event: any) => boolean | void | Promise<boolean | void>
   /** 收到的消息 / 她发出去的话（只看） */
@@ -195,7 +195,7 @@ export interface Api {
   tool(builder: Tool | Tool[] | ((where: Where) => Tool | Tool[] | null | undefined)): Off
   defineTool(spec: ToolSpec): Tool
   context(fn: (args: { chat: Chat; sessionId: string }) => string | void): Off
-  rule(fn: string | ((kind: 'private' | 'social', cfg: any) => string | string[] | void)): Off
+  rule(fn: string | ((kind: 'private' | 'trusted' | 'social', cfg: any) => string | string[] | void)): Off
   command(c: Command): Off
   every(ms: number, fn: () => any, label?: string): Off
   later(ms: number, fn: () => any): Off

@@ -1,20 +1,28 @@
 // 危险命令确认：命中规则才问主人；确认放行、取消/超时/陌生人都不执行。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { tmpdir } from 'node:os'
+import { mkdtempSync } from 'node:fs'
+import { join } from 'node:path'
 
 const { isDangerousCommand, createDangerGuard } = await import('../src/security/danger.js')
+const { dataDir, dshHome } = await import('../src/core/store.js')
+process.env.AURABOT_DATA_DIR = mkdtempSync(join(tmpdir(), 'aurabot-danger-'))
 
 const owner = '10001'
 const ownerChat = `private:${owner}`
+const friend = '20002'
+const friendChat = `private:${friend}`
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-function makeGuard ({ enabled = true, timeoutMs = 5000 } = {}) {
+function makeGuard ({ enabled = true, timeoutMs = 5000, isTrustedChat } = {}) {
   const delivered = []
   const cfg = { security: { dangerConfirm: enabled } }
   const guard = createDangerGuard({
     getConfig: () => cfg,
     deliver: async (chatId, text) => { delivered.push({ chatId, text }) },
-    chatOfSession: (sid) => (sid === 'sid-owner' ? ownerChat : sid === 'sid-other' ? 'private:999' : ''),
+    chatOfSession: (sid) => (sid === 'sid-owner' ? ownerChat : sid === 'sid-other' ? 'private:999' : sid === 'sid-friend' ? friendChat : ''),
+    isTrustedChat,
     ownerQQ: () => owner,
     timeoutMs,
   })
@@ -197,3 +205,54 @@ test('dd：只拦往裸块设备写，测速/只读备份放行，逆序写法�
     'dd if=/tmp/x of="/dev/mmcblk0"',
     'cat /tmp/x > /dev/vda',
   ]) assert.ok(isDangerousCommand(cmd), '应拦：' + cmd)})
+
+test('信任会话：危险命令发给主人确认，主人确认才放行', async () => {
+  const { guard, delivered } = makeGuard({ timeoutMs: 5000, isTrustedChat: (chatId) => chatId === friendChat })
+  let ran = false
+  const p = guard.preExecute(execOf('rm -rf /', { sid: 'sid-friend' }), () => { ran = true; return 'NEXT' })
+  assert.equal(delivered.length, 1)
+  assert.equal(delivered[0].chatId, ownerChat)
+  assert.ok(delivered[0].text.includes('信任好友'))
+  assert.ok(delivered[0].text.includes(friend))
+  assert.equal(guard.handleReply(friendChat, friend, '确认'), false)
+  assert.equal(guard.pendingCount, 1)
+  assert.equal(ran, false)
+  assert.equal(guard.handleReply(ownerChat, owner, '确认'), true)
+  assert.equal(await p, 'NEXT')
+  assert.equal(ran, true)
+  assert.equal(guard.pendingCount, 0)
+})
+
+test('信任会话：主人回「取消」就拦下', async () => {
+  const { guard, delivered } = makeGuard({ timeoutMs: 5000, isTrustedChat: (chatId) => chatId === friendChat })
+  let ran = false
+  const p = guard.preExecute(execOf('rm -rf /', { sid: 'sid-friend' }), () => { ran = true; return 'NEXT' })
+  assert.equal(delivered.length, 1)
+  assert.equal(delivered[0].chatId, ownerChat)
+  assert.equal(guard.handleReply(ownerChat, owner, '取消'), true)
+  assert.equal((await p).kind, 'deny')
+  assert.equal(ran, false)
+  assert.equal(guard.pendingCount, 0)
+})
+
+test('信任会话：主人超时没回就拦下', async () => {
+  const { guard, delivered } = makeGuard({ timeoutMs: 30, isTrustedChat: (chatId) => chatId === friendChat })
+  let ran = false
+  const result = await guard.preExecute(execOf('rm -rf /', { sid: 'sid-friend' }), () => { ran = true; return 'NEXT' })
+  assert.equal(result.kind, 'deny')
+  assert.equal(ran, false)
+  assert.equal(delivered.length, 1)
+  assert.equal(delivered[0].chatId, ownerChat)
+  assert.equal(guard.pendingCount, 0)
+})
+
+test('信任会话：敏感路径禁读禁写，普通命令不受影响', async () => {
+  const { guard, delivered } = makeGuard({ timeoutMs: 5000, isTrustedChat: (chatId) => chatId === friendChat })
+  for (const p of [join(dshHome(), '.credentials.yaml'), join(dshHome(), '.env'), join(dataDir(), 'config.json'), join(dataDir(), 'sessions.json'), join(dataDir(), 'trustedFriends.json')]) {
+    assert.equal((await guard.preExecute(execOf(`cat ${p}`, { sid: 'sid-friend' }), () => 'NEXT')).kind, 'deny', `应拦：${p}`)
+  }
+  assert.equal((await guard.preExecute(execOf('cat ~/.dsh/.env', { sid: 'sid-friend' }), () => 'NEXT')).kind, 'deny')
+  assert.equal((await guard.preExecute({ name: 'read_file', arguments: { path: join(dataDir(), 'trustedFriends.json') }, agent: { session: { id: 'sid-friend' } } }, () => 'NEXT')).kind, 'deny')
+  assert.equal(await guard.preExecute(execOf('ls /tmp', { sid: 'sid-friend' }), () => 'NEXT'), 'NEXT')
+  assert.equal(delivered.length, 0)
+})

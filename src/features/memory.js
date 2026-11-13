@@ -235,12 +235,13 @@ export function search(idx, query, o = {}) {
         if (from >= period.end || until <= period.start || until <= from) continue
       } else if (!isCurrent(it, now)) continue
     }
-    eligible.set(it.id, it)
     const aboutHit = Boolean(it.about) && aboutSet.has(String(it.about))
     const vector = vectors.get(it.id)
     if (s <= 0 && vector === undefined) continue // 零关键词只能由足够相似的向量召回
     const importance = 0.6 + 0.8 * (Number(it.importance) || 0.5)
     const score = ((s > 0 ? s : vector) + (aboutHit ? 0.8 : 0)) * importance * (0.55 + 0.45 * retention(it, now))
+    // 关联扩展只能带入本身也有一点检索信号的记忆，不能仅凭关系链接扩散到无关内容。
+    eligible.set(it.id, { it, score })
     scored.push({ it, score, keyword: s, vector, why: why.sort((x, y) => y[1] - x[1]).slice(0, 3).map((w) => w[0]).concat(aboutHit ? ['（关于这个人）'] : [], vector !== undefined ? ['（语义相关）'] : []) })
   }
   // 关键词名次始终从关键词候选里算，向量候选不能改变原本的关键词排序。
@@ -271,8 +272,9 @@ export function search(idx, query, o = {}) {
     const have = new Set(selected.map((h) => h.it.id))
     for (const hit of [...selected]) for (const id of hit.it.related || []) {
       if (selected.length >= limit) break
-      const it = eligible.get(id)
-      if (!it || have.has(id)) continue
+      const related = eligible.get(id)
+      if (!related || have.has(id) || related.score < Math.max(0.15, (o.minScore ?? 0.35) * 0.5)) continue
+      const it = related.it
       selected.push({ it, score: hit.score * 0.6, why: ['（相关的事）'] })
       have.add(id)
     }

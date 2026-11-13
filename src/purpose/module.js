@@ -52,12 +52,14 @@ export function purposeConfig(cfg = {}) {
   return normalizePurposeConfig({
     // 总开关只看本模块自己的设置（ext.purpose.enabled，默认 false）；
     // 与旧的「主动搭话」互不影响——两套同时开会重复打扰，迁移说明里提醒主人别同时开。
-    enabled: cfg.enabled !== false && ext.enabled === true,
+    // 目的引擎替代旧 speakup 运行；手动 /purpose/fire 也必须经过这道互斥检查。
+    enabled: cfg.enabled !== false && ext.enabled === true && su.enabled !== true,
     ownerUin: cfg.ownerQQ,
     gapMinMs: clampInt(ext.minIntervalMinutes ?? su.minIntervalMinutes, 90, 5, 2880) * MINUTE,
     gapMaxMs: clampInt(ext.maxIntervalMinutes ?? su.maxIntervalMinutes, 240, 5, 2880) * MINUTE,
     initialDelayMinMs: clampInt(ext.initialDelayMinutes, 15, 1, 720) * MINUTE,
-    dailyMax: clampInt(ext.maxPerDay ?? su.maxPerDay, 3, 0, 20),
+    // 实验性启用期间，目的引擎每天最多主动联系一次。
+    dailyMax: 1,
     idleThresholdMs: clampInt(ext.idleMinutes ?? su.idleMinutes, 40, 0, 1440) * MINUTE,
     minMaterials: clampInt(ext.minMaterials, DEFAULT_PURPOSE_CONFIG.minMaterials, 0, 20),
     maxMaterials: clampInt(ext.maxMaterials, DEFAULT_PURPOSE_CONFIG.maxMaterials, 6, 80),

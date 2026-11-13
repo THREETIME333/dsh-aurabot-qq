@@ -44,7 +44,8 @@ export function scoreText(text) {
   let d = 0
   for (const w of UP) if (t.includes(w)) d += 6
   for (const w of DOWN) if (t.includes(w)) d -= 8
-  return Math.max(-20, Math.min(20, d))
+  // 关键词只是弱信号；同一句碰到多个词也不要把心情瞬间推到极端。
+  return Math.max(-8, Math.min(8, d))
 }
 
 /** 心情基线的兜底值：没有配置时用它（和上游原来的 60 一致）。改基线只改配置项 mood.base。 */
@@ -113,7 +114,7 @@ export function createMood({ getConfig, dsh, log }) {
       if (silent ? !modelJudge : modelJudge) return
       const d0 = scoreText(text)
       if (!d0) return
-      const d = Math.round(d0 * (direct ? 1 : 0.3) * (owner ? 1.5 : 1))
+      const d = Math.max(-8, Math.min(8, Math.round(d0 * (direct ? 1 : 0.3) * (owner ? 1.5 : 1))))
       nudge(d, `${who || '有人'}说「${clipText(text, 20)}」`)
     },
     /**
@@ -141,7 +142,9 @@ export function createMood({ getConfig, dsh, log }) {
         })
         const r = parseMoodJudge(out)
         if (!r) return null
-        if (r.confidence >= 0.6 && Math.abs(r.delta) >= 2) nudge(r.delta, r.reason || '刚才那一下')
+        // 模型和关键词是互斥的；模型结果也按弱信号处理，避免单轮判断造成大幅跳变。
+        const delta = Math.max(-8, Math.min(8, Math.round(r.delta * r.confidence * 0.5)))
+        if (r.confidence >= 0.6 && Math.abs(delta) >= 1) nudge(delta, r.reason || '刚才那一下')
         return r
       } catch (error) {
         return null

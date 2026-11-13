@@ -1705,7 +1705,7 @@ export function createMemoryStore({ dsh, getConfig, hub, log, fetchImpl }) {
         const speaker = rawSpeaker || (chatId.startsWith('private:') ? chatId.slice(8) : speakers.size === 1 ? [...speakers][0] : '')
       const scope = x.scope === 'self' ? 'self' : x.scope === 'group' && chatId.startsWith('group:') && cfg.memory.groupMemory !== false ? 'group' : ''
         if (x.scope === 'group' && (!scope || x.about_qq || x.about || /主人/.test(String(x.text)) || (ownerQQ && String(x.text).includes(ownerQQ)) || (cfg.ownerName && String(x.text).includes(cfg.ownerName)) || ownerNames.some((name) => String(x.text).includes(name)))) continue
-      if (x.scope === 'self' && (x.about || about_qq || /主人/.test(String(x.text)) || (ownerQQ && String(x.text).includes(ownerQQ)) || (cfg.ownerName && String(x.text).includes(cfg.ownerName)) || ownerNames.some((name) => String(x.text).includes(name)))) continue
+      if (x.scope === 'self' && (x.about || x.about_qq || /主人/.test(String(x.text)) || (ownerQQ && String(x.text).includes(ownerQQ)) || (cfg.ownerName && String(x.text).includes(cfg.ownerName)) || ownerNames.some((name) => String(x.text).includes(name)))) continue
         if (x.about_qq && !/^\d+$/.test(String(x.about_qq).trim())) continue
         const qq = String(x.about_qq ?? '').replace(/\D/g, '')
         if (qq && qq === String(cfg.botQQ || '')) continue

@@ -3,7 +3,7 @@
 import { defineTool, str } from '../../tools/tools.js'
 import { fetchGuarded } from '../../core/net.js'
 
-const ENDPOINT = 'https://html.duckduckgo.com/html/'
+const ENDPOINT = 'https://lite.duckduckgo.com/lite/'
 const MAX_QUERY_CHARS = 200
 const MAX_HTML_BYTES = 1_000_000
 const RESULT_COUNT = 5
@@ -24,7 +24,8 @@ function decodeHtml(value) {
 
 function resultUrl(raw) {
   try {
-    let url = new URL(raw, ENDPOINT)
+    const normalized = String(raw || '').replace(/&amp;/gi, '&')
+    let url = new URL(normalized.startsWith('//') ? `https:${normalized}` : normalized, ENDPOINT)
     if (url.hostname === 'duckduckgo.com' && url.pathname === '/l/') {
       const target = url.searchParams.get('uddg')
       if (!target) return ''
@@ -45,18 +46,19 @@ function looksSuspicious(url, title, snippet) {
 }
 
 function parseResults(html) {
-  const anchors = [...String(html).matchAll(/<a\b([^>]*\bclass="[^"]*\bresult__a\b[^"]*"[^>]*)>([\s\S]*?)<\/a>/gi)]
+  const source = String(html)
+  const anchors = [...source.matchAll(/<a\b([^>]*\bclass\s*=\s*(['"])[^'"]*\bresult-link\b[^'"]*\2[^>]*)>([\s\S]*?)<\/a>/gi)]
   const results = []
   for (let i = 0; i < anchors.length && results.length < RESULT_COUNT; i++) {
     const match = anchors[i]
-    const href = match[1].match(/\bhref="([^"]+)"/i)?.[1]
+    const href = match[1].match(/\bhref\s*=\s*(['"])(.*?)\1/i)?.[2]?.replace(/&amp;/gi, '&')
     const url = resultUrl(href || '')
-    const title = decodeHtml(match[2])
+    const title = decodeHtml(match[3])
     if (!url || !title) continue
     const start = match.index + match[0].length
     const end = anchors[i + 1]?.index ?? Math.min(String(html).length, start + 5000)
-    const following = String(html).slice(start, end)
-    const snippetHtml = following.match(/class="[^"]*\bresult__snippet\b[^"]*"[^>]*>([\s\S]*?)<\//i)?.[1] || ''
+    const following = source.slice(start, end)
+    const snippetHtml = following.match(/<[^>]*class\s*=\s*(['"])[^'"]*\bresult-snippet\b[^'"]*\1[^>]*>([\s\S]*?)<\/td>/i)?.[2] || ''
     const snippet = decodeHtml(snippetHtml).slice(0, 240) || '（没有摘要）'
     results.push({ title: title.slice(0, 180), url, snippet, suspicious: looksSuspicious(url, title, snippet) })
   }

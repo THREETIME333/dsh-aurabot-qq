@@ -16,5 +16,6 @@ import song from './song/index.js'
 import profile from './profile/index.js'
 import contacts from './contacts/index.js'
 import video from './video/index.js'
+import search from './search/index.js'
 
-export const BUILTINS = [stickers, voice, mood, memory, qqTools, qqApi, imagegen, diary, qzoneSocial, speakup, purpose, bili, song, profile, contacts, video]
+export const BUILTINS = [stickers, voice, mood, memory, qqTools, qqApi, imagegen, diary, qzoneSocial, speakup, purpose, bili, song, profile, contacts, video, search]
